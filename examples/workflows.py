@@ -1,8 +1,9 @@
 import json
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from strataleaf import Database, Archives, Conflict, InvalidDocument, InvalidCursor, ReadOnly, SnapshotTooOld, ReplicationError
+from strataleaf import Database, Archives, Conflict, InvalidDocument, InvalidCursor, NotFound, ReadOnly, SnapshotTooOld, ReplicationError
 
 SCHEMA = {"fields": {"region": "string", "sequence": "integer", "code": "string"}, "required": ["region", "sequence"]}
 
@@ -116,6 +117,56 @@ def run(flow):
                 for index in range(6):
                     replay.put("segments", f"seg_{index:02}", {"region": "east" if index % 2 == 0 else "west", "sequence": index, "code": "c" + str(index)})
                 output = {"blocked": blocked, "old_value": old.document, "advanced": advanced, "expired_read": expired, "replay_after_compaction": replay.commit().__dict__}
+            elif flow == "views":
+                db.catalog.create("notes")
+                seeded = db.batch().put("notes", "n0", {"body": "first"}).commit().revision
+                created = db.views.create("paired", ["notes", "segments"], seeded)
+                db.views.create("notes_only", ["notes"], seeded)
+                db.batch().put("segments", "seg_00", {"region": "north", "sequence": 8}).put("notes", "n0", {"body": "edited"}).commit()
+                held = db.retention.compact(db.revision)
+                moment = db.views.snapshot("paired")
+                same_moment = {"name": moment["name"], "revision": moment["revision"],
+                               "collections": {name: [row.__dict__ for row in rows]
+                                               for name, rows in moment["collections"].items()}}
+                pages = []
+                page = db.query("segments", view="paired", limit=2)
+                pages.extend(row.key for row in page.records)
+                cursor = page.cursor
+                while cursor:
+                    page = db.query("segments", view="paired", limit=2, cursor=cursor)
+                    pages.extend(row.key for row in page.records)
+                    cursor = page.cursor
+                output = {"created": created, "held": held, "snapshot": same_moment, "page_keys": pages,
+                          "now": db.get("notes", "n0").document,
+                          "duplicate": rejected(lambda: db.views.create("paired", ["notes"]), Conflict),
+                          "outside_view": rejected(lambda: db.query("segments", view="notes_only"), InvalidDocument),
+                          "both_revision_and_view": rejected(lambda: db.get("notes", "n0", revision=seeded, view="paired"), InvalidDocument),
+                          "unknown_collection": rejected(lambda: db.views.create("ghost", ["missing"]), NotFound)}
+                # A separate OS process reopens the file and resolves the same name.
+                child = subprocess.run([sys.executable, "-m", "examples.view_reader",
+                                        str(folder / "source.db"), "paired", "segments"],
+                                       capture_output=True, text=True, check=True,
+                                       cwd=Path(__file__).resolve().parents[1])
+                output["cross_process"] = json.loads(child.stdout)
+                # Backup keeps the logical name; restore clears pins/consumers, not views.
+                archive = db.archives.backup(folder / "with_views.db")
+                Archives.restore(folder / "with_views.db", folder / "restored_views.db", archive["sha256"])
+                with Database(folder / "restored_views.db") as restored:
+                    output["restored"] = {"view": restored.views.get("paired"),
+                                          "document": restored.get("notes", "n0", view="paired").document,
+                                          "head": restored.revision,
+                                          "compact": restored.retention.compact(restored.revision)}
+                # One view dropping must not disturb another view still reading that moment.
+                dropped = db.views.drop("paired")
+                still_held = db.retention.compact(db.revision)
+                notes_view = db.views.get("notes_only")
+                notes_document = db.get("notes", "n0", view="notes_only").document
+                db.views.drop("notes_only")
+                released = db.retention.compact(db.revision)
+                output.update({"dropped": dropped, "still_held": still_held, "notes_view": notes_view,
+                               "notes_document": notes_document, "released": released,
+                               "remaining": db.views.list(),
+                               "after_drop": rejected(lambda: db.get("notes", "n0", view="paired"), NotFound)})
             elif flow == "expire":
                 written = db.batch().put("segments", "timed", {"region": "north", "sequence": 10}, expires_at=100).commit()
                 before = db.get("segments", "timed")

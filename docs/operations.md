@@ -1,6 +1,8 @@
 # 恢复与观测
 
-备份必须调用 archives.backup，不能只拷贝活动主文件。backup 与 restore 都不覆盖存在目标；恢复使用新路径，先校验来源 SHA-256，再打开新句柄。主库恢复生成新身份，副本恢复绑定来源。恢复清理原机保留点与消费者；消费方重新注册时须根据已恢复的 floor/head 判断是否需要重建。
+备份必须调用 archives.backup，不能只拷贝活动主文件。backup 与 restore 都不覆盖存在目标；恢复使用新路径，先校验来源 SHA-256，再打开新句柄。主库恢复生成新身份，副本恢复绑定来源。恢复清理原机保留点与消费者；消费方重新注册时须根据已恢复的 floor/head 判断是否需要重建。具名读视图随备份文件复制并在恢复后保持同名同修订；若之后要回收它保护的修订，必须显式 `views.drop`，恢复本身不代调用方释放。
+
+跨进程使用具名视图：创建进程登记名称后可以退出；新进程用 `Database(path)` 重新打开同一文件，以 `db.views.get(name)` 解析名称，再用 `db.get(..., view=name)`、`db.query(..., view=name)` 或 `db.views.snapshot(name)` 读取。`python3 -m examples.workflows views` 会真的启动一个子进程读取父进程登记的视图，输出中的 `cross_process.pid` 与 `head` 可核对两个进程看到的是同一修订。也可手工对任一数据库执行 `python3 -m examples.view_reader PATH VIEW_NAME [COLLECTION]`。跨进程依赖 SQLite 的 WAL 与文件锁：创建者应先提交登记再让读者打开，或让读者对 `NotFound` 重试；视图名的解析与数据读取在同一读事务，读者不会看到名称与快照不一致。
 
 diagnostics.inspect(deep=True) 检查 SQLite 完整性、外键、提交连续性、当前索引与文档投影；fingerprint 比较指定读视图的键、文档版本、内容及到期事实。前者不能证明所有业务数据正确，后者相同也不能代替模式与索引定义比对。checkpoint 返回 SQLite 的 busy、log、checkpointed 信息，并不承诺截断 WAL。
 

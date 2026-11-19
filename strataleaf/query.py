@@ -5,6 +5,7 @@ from .errors import InvalidCursor, InvalidDocument, NotFound
 from .indexes import equality_candidates
 from .mvcc import checked_revision, record, visible_rows, latest_row
 from .predicates import equality_terms, matches, validate_predicate
+from .views import resolve
 
 
 @dataclass(frozen=True)
@@ -19,14 +20,16 @@ class QueryEngine:
     def __init__(self, store):
         self.store = store
 
-    def select(self, collection, predicate=None, limit=100, cursor=None, revision=None, force_scan=False):
+    def select(self, collection, predicate=None, limit=100, cursor=None, revision=None, force_scan=False, view=None):
         validate_predicate(predicate)
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
             raise InvalidDocument("page size must be between 1 and 1000")
         with self.store.read() as connection:
             if not connection.execute("SELECT 1 FROM collections WHERE name=?", (collection,)).fetchone():
                 raise NotFound("unknown collection")
-            fingerprint = digest({"collection": collection, "predicate": predicate})
+            revision, _ = resolve(connection, collection, revision, view)
+            fingerprint = digest({"collection": collection, "predicate": predicate,
+                                  **({"view": view} if view is not None else {})})
             after = None
             if cursor is not None:
                 payload = decode_cursor(self.store, cursor)

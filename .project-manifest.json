@@ -19,7 +19,8 @@
       "同一历史读版本完成分组和数值计算",
       "读后修改受版本前置条件保护",
       "物理完整性与逻辑引用一致性可观察",
-      "外部文档流验证后整批导入"
+      "外部文档流验证后整批导入",
+      "具名读视图持久绑定名称、修订与集合组并阻塞回收"
     ]
   },
   "project_shape": "backend",
@@ -75,7 +76,8 @@
         "aggregate",
         "patch",
         "inspect",
-        "transfer"
+        "transfer",
+        "views"
       ]
     },
     {
@@ -84,7 +86,8 @@
       "responsibility": "读版本固定、索引选择与分页",
       "owned_facts": "读版本固定、索引选择与分页",
       "consumers": [
-        "query"
+        "query",
+        "views"
       ]
     },
     {
@@ -135,7 +138,8 @@
       "responsibility": "保留约束与安全水位",
       "owned_facts": "保留约束与安全水位",
       "consumers": [
-        "compact"
+        "compact",
+        "views"
       ]
     },
     {
@@ -163,7 +167,8 @@
       "owned_facts": "物理完整性、逻辑索引与内容指纹",
       "consumers": [
         "backup",
-        "inspect"
+        "inspect",
+        "views"
       ]
     },
     {
@@ -173,6 +178,19 @@
       "owned_facts": "文档流边界与原子导入",
       "consumers": [
         "transfer"
+      ]
+    },
+    {
+      "id": "views",
+      "path": "strataleaf/views.py",
+      "responsibility": "具名读视图的登记、解析与保留阻塞",
+      "owned_facts": "具名读视图的名称、修订与集合组",
+      "consumers": [
+        "snapshot",
+        "query",
+        "compact",
+        "inspect",
+        "backup"
       ]
     },
     {
@@ -193,7 +211,8 @@
         "compact",
         "expire",
         "aggregate",
-        "inspect"
+        "inspect",
+        "views"
       ]
     },
     {
@@ -513,6 +532,27 @@
       "success": "外部文档流验证后整批导入",
       "failure": "重复键整体拒绝",
       "verification": "python3 -m examples.workflows transfer"
+    },
+    {
+      "id": "views",
+      "name": "具名读视图",
+      "entry": "Database.views.create",
+      "module_ids": [
+        "views",
+        "snapshot",
+        "query",
+        "cursor",
+        "compact",
+        "storage"
+      ],
+      "steps": [
+        "输入校验与读取已有事实",
+        "名称、修订与集合组",
+        "形成可观察结果"
+      ],
+      "success": "名称持久绑定同一修订且跨进程可读",
+      "failure": "重名、越界集合或已回收修订拒绝",
+      "verification": "python3 -m examples.workflows views"
     }
   ],
   "complexity": {

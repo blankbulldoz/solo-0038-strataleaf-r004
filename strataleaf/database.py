@@ -12,6 +12,7 @@ from .retention import Retention
 from .storage import Storage
 from .transaction import WriteBatch
 from .transfer import Transfer
+from .views import Views
 
 
 class Database:
@@ -27,6 +28,7 @@ class Database:
         self.aggregates = Aggregates(self._store)
         self.transfer = Transfer(self._store)
         self.diagnostics = Diagnostics(self._store)
+        self.views = Views(self._store)
         self._queries = QueryEngine(self._store)
 
     @property
@@ -37,11 +39,11 @@ class Database:
     def batch(self, request_key=None):
         return WriteBatch(self._store, request_key)
 
-    def get(self, collection, key, revision=None):
-        return read_record(self._store, collection, key, revision)
+    def get(self, collection, key, revision=None, view=None):
+        return read_record(self._store, collection, key, revision, view)
 
-    def query(self, collection, predicate=None, limit=100, cursor=None, revision=None, force_scan=False):
-        return self._queries.select(collection, predicate, limit, cursor, revision, force_scan)
+    def query(self, collection, predicate=None, limit=100, cursor=None, revision=None, force_scan=False, view=None):
+        return self._queries.select(collection, predicate, limit, cursor, revision, force_scan, view)
 
     def patch(self, collection, key, patch, expected=None):
         return patch_document(self._store, collection, key, patch, expected)

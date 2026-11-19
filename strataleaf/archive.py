@@ -84,6 +84,8 @@ class Archives:
             if not follower:
                 target.execute("UPDATE meta SET value=? WHERE key='database_id'", (str(uuid.uuid4()),))
                 target.execute("UPDATE meta SET value=? WHERE key='cursor_secret'", (secrets.token_hex(32),))
+            # Pins and consumers are leases held by the previous host; named read
+            # views are logical content and survive restore with their revision.
             target.execute("DELETE FROM pins")
             target.execute("DELETE FROM consumers")
             target.commit()

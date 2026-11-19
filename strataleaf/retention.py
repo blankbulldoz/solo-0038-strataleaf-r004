@@ -3,15 +3,17 @@ from .codec import name
 from .errors import Conflict, InvalidDocument, NotFound
 from .mvcc import checked_revision
 from .transaction import WriteBatch
+from .views import resolve
 
 
 class Retention:
     def __init__(self, store):
         self.store = store
 
-    def pin(self, pin_name, revision=None):
+    def pin(self, pin_name, revision=None, view=None):
         name(pin_name)
         with self.store.atomic() as connection:
+            revision, _ = resolve(connection, None, revision, view)
             revision = checked_revision(self.store, revision)
             if connection.execute("SELECT 1 FROM pins WHERE name=?", (pin_name,)).fetchone():
                 raise Conflict("read pin already exists")
@@ -26,7 +28,8 @@ class Retention:
     def compact(self, target):
         with self.store.atomic(writable=True) as connection:
             target = checked_revision(self.store, target)
-            blockers = [row[0] for row in connection.execute("SELECT rev FROM pins UNION ALL SELECT ack FROM consumers")]
+            blockers = [row[0] for row in connection.execute(
+                "SELECT rev FROM pins UNION ALL SELECT ack FROM consumers UNION ALL SELECT revision FROM read_views")]
             boundary = min([target] + blockers)
             prior = int(self.store.get("floor"))
             if boundary < prior:

@@ -12,7 +12,7 @@ class Diagnostics:
             integrity = [row[0] for row in connection.execute("PRAGMA integrity_check" if deep else "PRAGMA quick_check")]
             references = [tuple(row) for row in connection.execute("PRAGMA foreign_key_check")]
             counts = {table: connection.execute("SELECT COUNT(*) FROM " + table).fetchone()[0]
-                      for table in ("collections", "versions", "commits", "index_defs", "index_values", "pins", "consumers")}
+                      for table in ("collections", "versions", "commits", "index_defs", "index_values", "pins", "consumers", "read_views")}
             revisions = [row[0] for row in connection.execute("SELECT rev FROM commits WHERE rev>? ORDER BY rev", (floor,))]
             issues = []
             if revisions != list(range(floor + 1, head + 1)):
@@ -26,6 +26,15 @@ class Diagnostics:
             for pin in connection.execute("SELECT name,rev FROM pins"):
                 if not floor <= pin["rev"] <= head:
                     issues.append("read pin outside retained history: " + pin["name"])
+            known = {row[0] for row in connection.execute("SELECT name FROM collections")}
+            for view in connection.execute("SELECT name,revision,collections FROM read_views"):
+                if not floor <= view["revision"] <= head:
+                    issues.append("read view outside retained history: " + view["name"])
+                members = loads(view["collections"])
+                if not isinstance(members, list) or not members or any(not isinstance(item, str) or item not in known for item in members):
+                    issues.append("read view references unknown collection: " + view["name"])
+                elif members != sorted(set(members)):
+                    issues.append("read view collections are not normalized: " + view["name"])
             if deep:
                 expected = set()
                 for definition in connection.execute("SELECT * FROM index_defs"):

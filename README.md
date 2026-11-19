@@ -25,11 +25,30 @@ with Database("strataleaf.db") as db:
 
 集合创建不是幂等操作；再次运行示例应使用新文件。`expected=0` 仅允许从未出现过的键；删除后保留墓碑版本，再创建必须指定墓碑版本或不带前置版本。没有 `expected` 的写入采用最后提交覆盖，读后修改应携带读取到的版本。
 
+## 具名读视图
+
+```python
+from strataleaf import Database
+
+with Database("strataleaf.db") as db:
+    moment = db.revision
+    db.views.create("report_2024", ["orders", "lines"], moment)
+    # ... 写入继续发生 ...
+
+# 另一个进程重新打开同一文件
+with Database("strataleaf.db") as db:
+    snapshot = db.views.snapshot("report_2024")      # 两个集合同一修订
+    page = db.query("orders", view="report_2024")     # 分页携带同一视图
+    db.retention.pin("report_reader", view="report_2024")
+```
+
+`python3 -m examples.workflows views` 会创建视图、在独立子进程中读取它，并演示删除一个视图不影响另一个视图对回收水位的阻塞。也可手工执行 `python3 -m examples.view_reader 数据库路径 视图名 [集合名]`。
+
 ## 工作流
 
 `python3 -m compileall -q strataleaf examples` 检查源码可编译。`python3 -m examples.workflows commit` 在独立临时目录运行多集合提交、重复请求和回滚示例，打印实际结果后自动清理。可用示例名：
 
-`catalog schema commit snapshot query index feed backup replica compact expire aggregate patch inspect transfer`
+`catalog schema commit snapshot query index feed backup replica compact expire aggregate patch inspect transfer views`
 
 每个示例约一秒以内，不需要联网。它们是生产 API 的有限工作流演示；自动化测试仍为 **deferred**，仓库不含测试套件，也不声明测试命令。`examples.observations` 另外提供写锁竞争与保留水位的可复现观测。
 
@@ -41,6 +60,10 @@ with Database("strataleaf.db") as db:
 - 查询支持嵌套布尔谓词与等值、范围、集合成员、存在性判断，按文档键升序分页。签名游标固定集合、谓词、读版本与键边界，可调整页大小。索引只服务当前版本；历史读取回退版本扫描，最终谓词始终复核。
 - `None` 和缺失字段不同，比较缺失字段不匹配；数值比较不把布尔值当数字。分组跳过缺失分组字段，显式空值保留；非数值度量不计入平均分母。
 - 读保留点和订阅确认位置限制回收水位；分页游标本身不自动注册保留点。需要跨长时操作的调用方应先 pin；水位已超过游标时明确拒绝。回收保留水位及其后完整读视图。已登记请求的幂等回执不随历史回收删除。
+- 具名读视图（`db.views`）把一个名称持久绑定到「一个修订 + 一组集合」。`db.views.create("daily", ["orders", "lines"], revision)` 在一个事务里校验集合存在并登记；重名返回 `Conflict` 且不覆盖原视图，缺少集合返回 `NotFound`，整体零可见。绑定默认取当前 head，也可显式指定修订。视图是目录元数据，不推进 `head`，不影响逻辑指纹；同一 SQLite 读事务内先解析名称再取数据，因此读到的是名称与可见快照一致的同一时刻。
+- 视图名可用于 `db.get(..., view=...)`、`db.query(..., view=...)`、`db.retention.pin(..., view=...)` 与 `db.views.snapshot(name)`；读取范围外的集合、同时给出 `revision` 与 `view`、未知名称分别明确失败。分页游标绑定视图名，必须携带同一 `view` 继续；换视图或换谓词拒绝。视图是回收水位的一道显式阻塞，`retention.compact` 不会回收活动视图的修订；删除视图只移除这一份保护，已被同修订的其它视图、pin 或消费者继续保护的历史不受影响，全部释放后水位才能推进。
+- 备份恢复保留视图名称及其修订（逻辑内容随快照复制），恢复清理的是原机 pin 与消费者这些租约，不清理视图；恢复后的主库仍能按同名读到同一时刻。视图与 pin 一样是本地命名元数据而非文档写入，副本上也可创建、读取与删除，不会因此被当作主库写入而拒绝；复制只携带文档、模式与索引，不迁移视图名称本身。
+- 集合后来新增字段不改变已建视图：视图只记录名称、修订与集合名，模式演进（`catalog.evolve`）只约束之后的写入，旧视图继续按原修订解释当时的 JSON。新增集合也不会自动加入既有视图；成员的增删需要新建视图名。
 - 变更流一次交付完整提交，消费方负责成功处理后确认；确认可前进到当前 head，系统不替消费方证明处理成功。释放消费者即放弃它的历史保护。
 - 备份使用 SQLite 在线备份 API，发布到未占用目标；校验摘要后恢复到新文件，禁止覆盖现有文件。恢复为新主库会生成新的数据库标识及游标签名密钥，保留文档版本；恢复为副本则绑定原主库。进程间不得直接复制活动 WAL 主文件代替备份。
 - 副本只能接收同一上游、连续的提交包。重复范围不重复写入；校验错误和缺口整包失败。分段追赶时使用版本扫描，追到导出端 head 才安装最新索引。目录 epoch 防止过时的同版本包倒退目录。副本不接收主库写入；基线不提供提升接口、双向复制或网络传输。导出校验和检测意外损坏，不代替对端身份认证。

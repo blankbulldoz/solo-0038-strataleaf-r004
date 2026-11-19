@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS index_values (
 CREATE INDEX IF NOT EXISTS index_document ON index_values(collection,key);
 CREATE TABLE IF NOT EXISTS pins (name TEXT PRIMARY KEY, rev INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS consumers (name TEXT PRIMARY KEY, ack INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS read_views (
+ name TEXT PRIMARY KEY, revision INTEGER NOT NULL, collections TEXT NOT NULL);
 """
 
 

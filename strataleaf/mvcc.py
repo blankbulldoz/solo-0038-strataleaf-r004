@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from .codec import loads
 from .errors import InvalidDocument, NotFound, SnapshotTooOld
+from .views import resolve
 
 
 @dataclass(frozen=True)
@@ -40,9 +41,10 @@ def record(row):
     return Record(row["collection"], row["key"], row["rev"], loads(row["body"]), row["expires"])
 
 
-def read_record(store, collection, key, revision=None):
+def read_record(store, collection, key, revision=None, view=None):
     with store.read() as connection:
         if not connection.execute("SELECT 1 FROM collections WHERE name=?", (collection,)).fetchone():
             raise NotFound("unknown collection: " + collection)
+        revision, _ = resolve(connection, collection, revision, view)
         revision = checked_revision(store, revision)
         return record(latest_row(connection, collection, key, revision))
